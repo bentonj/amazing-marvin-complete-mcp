@@ -1,0 +1,34 @@
+[project]
+name = "amazing-marvin-complete-mcp"
+version = "1.0.0"
+description = "MCP server for Amazing Marvin with complete public-API coverage (34 tools)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.10,<3",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+http = [
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+marvin-mcp = "marvin_mcp.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["marvin_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

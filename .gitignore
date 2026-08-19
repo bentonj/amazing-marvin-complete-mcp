@@ -1,0 +1,28 @@
+# Secrets - must never be committed (see SECURITY.md)
+*.env
+!.env.example
+*token*
+*secret*
+!scripts/check-no-secrets.sh
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Runtime state
+data/
+state/
+logs/
+
+# Editor/OS
+.DS_Store
+*~
