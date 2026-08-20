@@ -88,11 +88,14 @@ class MarvinClient:
         is_write: bool | None = None,
         force_full_access: bool = False,
         expect_json: bool = True,
+        extra_headers: dict | None = None,
     ) -> Any:
         if is_write is None:
             is_write = method.upper() != "GET"
         await self._limiter.acquire(is_write=is_write)
         headers = self._headers_for(endpoint, force_full_access=force_full_access)
+        if extra_headers:
+            headers = {**headers, **extra_headers}
         logger.info("Marvin API: %s %s", method.upper(), endpoint)
         try:
             resp = await self._http.request(
@@ -121,7 +124,14 @@ class MarvinClient:
         return await self.request("POST", "/test", expect_json=False)
 
     async def add_task(self, data: dict) -> dict:
-        return await self.request("POST", "/addTask", json=data)
+        # X-Auto-Complete: false (MarvinAPI issue #50) disables server-side
+        # shortcut parsing in the title. Without it, every '#word' in the
+        # title corrupts the task: the string is stored unresolved as
+        # parentId (overriding even an explicitly set parentId) and the task
+        # becomes invisible in the app.
+        return await self.request(
+            "POST", "/addTask", json=data, extra_headers={"X-Auto-Complete": "false"}
+        )
 
     async def mark_done(self, item_id: str) -> dict:
         return await self.request(

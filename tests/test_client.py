@@ -63,6 +63,14 @@ async def test_mark_done_sends_local_offset(settings, transport):
     assert body["timeZoneOffset"] == local_tz_offset_minutes()
 
 
+async def test_add_task_disables_autocomplete(settings, transport):
+    # X-Auto-Complete: false protects against '#word' in the title
+    # corrupting parentId (MarvinAPI issue #50, live-tested 2026-08-20)
+    client = make_client(transport, settings)
+    await client.add_task({"title": "Fix bug #123"})
+    assert transport.requests[-1].headers.get("X-Auto-Complete") == "false"
+
+
 async def test_error_response_raises_without_leaking_headers(settings, transport):
     import httpx
 

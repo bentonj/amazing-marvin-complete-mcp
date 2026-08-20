@@ -23,6 +23,13 @@ async def test_create_task_payload(init_server, transport):
     assert body["done"] is False
 
 
+async def test_create_task_time_estimate_in_ms(init_server, transport):
+    await server.create_task.fn(title="Test task", time_estimate_minutes=15)
+    body = transport.last_json()
+    assert body["timeEstimate"] == 900_000
+    assert transport.requests[-1].headers.get("X-Auto-Complete") == "false"
+
+
 async def test_set_priority_builds_fieldupdates_setters(init_server, transport):
     result = await server.set_priority.fn(item_id="t1", priority=2)
     assert "error" not in result

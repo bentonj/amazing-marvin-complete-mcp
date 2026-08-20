@@ -127,23 +127,21 @@ async def create_task(
     note: Annotated[str | None, Field(description="Note (markdown)")] = None,
     label_ids: Annotated[list[str] | None, Field(description="Label IDs (from get_labels)")] = None,
     due_date: Annotated[str | None, Field(description="Deadline YYYY-MM-DD (use sparingly)")] = None,
+    time_estimate_minutes: Annotated[
+        int | None, Field(description="Time estimate in minutes", ge=1)
+    ] = None,
 ) -> dict:
     """Create a task in Amazing Marvin. Prefer priority/frog over dates
     where possible.
 
-    About shortcut syntax in the title (verified against the live API
-    2026-08-19/20): '~15' → timeEstimate 15 min, '+YYYY-MM-DD' → day/schedule
-    (NOT deadline) and '*p1'..'*p3' → priority are parsed correctly
-    server-side and stripped from the title — but note the inverted mapping:
-    '*p1' (highest) → isStarred 3, '*p2' → 2, '*p3' (lowest) → isStarred 1. Other magic words ('*urgent',
-    '*fire', '*heavy', '*weight', '*love', '*lowfocus', '*physical') and
-    '$'-words (e.g. '$MONTH') are NOT parsed by the API — they are stored
-    literally in the title with no fields set (they only work in the app's
-    quick-add). However, NEVER use '#Category' through the API: the server stores
-    the string literally as parentId (e.g. parentId='#MCP') without resolving
-    any ID — the task ends up outside every category AND outside the Inbox,
-    effectively invisible. '@label' is unverified. Use the parent_id/label_ids
-    parameters instead."""
+    The title is stored verbatim: this tool disables the server's shortcut
+    parsing (X-Auto-Complete: false, verified against the live API
+    2026-08-20), so quick-add syntax like '#Category', '~15', '+YYYY-MM-DD'
+    and '*p2' is NOT parsed — '#' in titles (e.g. ticket references) is
+    therefore safe. Without this, every '#word' would corrupt the task (the
+    string is stored unresolved as parentId, making the task invisible).
+    Use the parameters instead: parent_id, day, priority,
+    time_estimate_minutes, label_ids."""
     try:
         data: dict[str, Any] = {"title": title, "done": False}
         if parent_id:
@@ -160,6 +158,8 @@ async def create_task(
             data["labelIds"] = label_ids
         if due_date:
             data["dueDate"] = due_date
+        if time_estimate_minutes is not None:
+            data["timeEstimate"] = time_estimate_minutes * 60_000
         created = await get_client().add_task(data)
         return {"created": created}
     except Exception as e:
