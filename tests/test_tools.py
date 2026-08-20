@@ -92,6 +92,26 @@ async def test_create_project_uses_addproject(init_server, transport):
     assert req.headers.get("X-API-Token")
 
 
+async def test_create_project_blocks_hash_in_title(init_server, transport):
+    # /addProject corrupts '#word' (unresolved parentId) and ignores the
+    # X-Auto-Complete header (live-tested 2026-08-20) — local block
+    before = len(transport.requests)
+    result = await server.create_category_or_project.fn(
+        title="Campaign #2026", kind="project", parent_id="cat1"
+    )
+    assert "error" in result
+    assert len(transport.requests) == before  # no API call spent
+
+
+async def test_create_category_allows_hash_in_title(init_server, transport):
+    # /doc/create parses nothing — '#' in category titles is safe
+    result = await server.create_category_or_project.fn(
+        title="Tickets #2026", kind="category", parent_id="root"
+    )
+    assert "error" not in result
+    assert transport.last_json()["title"] == "Tickets #2026"
+
+
 async def test_record_habit_and_undo(init_server, transport):
     await server.record_habit.fn(habit_id="h1", value=2)
     body = transport.last_json()

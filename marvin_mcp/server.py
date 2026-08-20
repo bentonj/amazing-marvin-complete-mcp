@@ -13,6 +13,7 @@ of the README for the full list.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Annotated, Any, Literal
 
@@ -361,9 +362,23 @@ async def create_category_or_project(
     note: Annotated[str | None, Field(description="Note")] = None,
 ) -> dict:
     """Create a category (via /doc/create, Full Access Token) or a project
-    (via /addProject). Categories can contain categories; projects cannot."""
+    (via /addProject). Categories can contain categories; projects cannot.
+
+    Note: project titles must not contain '#word' — /addProject has the same
+    corruption bug as /addTask (the string is stored unresolved as parentId
+    and the project becomes invisible) but ignores the X-Auto-Complete
+    header (verified against the live API 2026-08-20), so this tool blocks
+    it locally. Category titles are unaffected (/doc/create parses
+    nothing)."""
     try:
         if kind == "project":
+            if re.search(r"#\S", title):
+                return {
+                    "error": "Project titles containing '#word' are blocked: "
+                    "/addProject stores the string unresolved as parentId "
+                    "(making the project invisible) and ignores the "
+                    "X-Auto-Complete header. Rephrase the title without '#'."
+                }
             data: dict[str, Any] = {"title": title, "parentId": parent_id, "done": False}
             if note:
                 data["note"] = note
