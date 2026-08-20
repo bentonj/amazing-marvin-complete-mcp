@@ -130,7 +130,9 @@ the half of the repo you can use without running it.
 - `/addTask` parses *some* of Marvin's quick-add shortcut syntax
   server-side: `~15` becomes a 15-minute `timeEstimate`, `+YYYY-MM-DD` sets
   `day` (scheduling — **not** the deadline) and `*p1`..`*p3` set priority.
-  All three are stripped from the title. The other magic words (`*urgent`,
+  All three are stripped from the title. Note the priority mapping is
+  inverted relative to the stored field: `*p1` (highest) → `isStarred: 3`,
+  `*p2` → `2`, `*p3` (lowest) → `isStarred: 1`. The other magic words (`*urgent`,
   `*fire`, `*heavy`, `*weight`, `*love`, `*lowfocus`, `*physical`) and
   `$`-words (e.g. `$MONTH` on a non-recurring task) are **not** parsed —
   they are stored literally in the title with no fields set; they only work

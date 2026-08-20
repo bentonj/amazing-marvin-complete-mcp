@@ -134,7 +134,8 @@ async def create_task(
     About shortcut syntax in the title (verified against the live API
     2026-08-19/20): '~15' → timeEstimate 15 min, '+YYYY-MM-DD' → day/schedule
     (NOT deadline) and '*p1'..'*p3' → priority are parsed correctly
-    server-side and stripped from the title. Other magic words ('*urgent',
+    server-side and stripped from the title — but note the inverted mapping:
+    '*p1' (highest) → isStarred 3, '*p2' → 2, '*p3' (lowest) → isStarred 1. Other magic words ('*urgent',
     '*fire', '*heavy', '*weight', '*love', '*lowfocus', '*physical') and
     '$'-words (e.g. '$MONTH') are NOT parsed by the API — they are stored
     literally in the title with no fields set (they only work in the app's
