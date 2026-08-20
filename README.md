@@ -127,9 +127,14 @@ the half of the repo you can use without running it.
 **Tasks & projects**
 - `POST /markDone` works for tasks only — projects get
   `400 "Can only mark Tasks done with this API"`.
-- `/addTask` parses Marvin's quick-add shortcut syntax server-side: `~15`
-  becomes a 15-minute `timeEstimate` and `+YYYY-MM-DD` sets `day`
-  (scheduling — **not** the deadline). Both are stripped from the title.
+- `/addTask` parses *some* of Marvin's quick-add shortcut syntax
+  server-side: `~15` becomes a 15-minute `timeEstimate`, `+YYYY-MM-DD` sets
+  `day` (scheduling — **not** the deadline) and `*p1`..`*p3` set priority.
+  All three are stripped from the title. The other magic words (`*urgent`,
+  `*fire`, `*heavy`, `*weight`, `*love`, `*lowfocus`, `*physical`) and
+  `$`-words (e.g. `$MONTH` on a non-recurring task) are **not** parsed —
+  they are stored literally in the title with no fields set; they only work
+  in the app's quick-add.
   But **never use `#Category` through the API**: the server stores the
   string literally as `parentId` (greedy up to the first hyphen, e.g.
   `#MCP-TEST` → `parentId: "#MCP"` and a corrupted title) without resolving

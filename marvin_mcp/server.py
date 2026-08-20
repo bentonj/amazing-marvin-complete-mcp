@@ -132,9 +132,13 @@ async def create_task(
     where possible.
 
     About shortcut syntax in the title (verified against the live API
-    2026-08-19): '~15' → timeEstimate 15 min and '+YYYY-MM-DD' → day/schedule
-    (NOT deadline) are parsed correctly server-side and stripped from the
-    title. However, NEVER use '#Category' through the API: the server stores
+    2026-08-19/20): '~15' → timeEstimate 15 min, '+YYYY-MM-DD' → day/schedule
+    (NOT deadline) and '*p1'..'*p3' → priority are parsed correctly
+    server-side and stripped from the title. Other magic words ('*urgent',
+    '*fire', '*heavy', '*weight', '*love', '*lowfocus', '*physical') and
+    '$'-words (e.g. '$MONTH') are NOT parsed by the API — they are stored
+    literally in the title with no fields set (they only work in the app's
+    quick-add). However, NEVER use '#Category' through the API: the server stores
     the string literally as parentId (e.g. parentId='#MCP') without resolving
     any ID — the task ends up outside every category AND outside the Inbox,
     effectively invisible. '@label' is unverified. Use the parent_id/label_ids
