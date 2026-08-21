@@ -1,7 +1,7 @@
 [project]
 name = "amazing-marvin-complete-mcp"
 version = "1.0.0"
-description = "MCP server for Amazing Marvin with complete public-API coverage (34 tools)"
+description = "MCP server for Amazing Marvin with complete public-API coverage and global task search (36 tools)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"

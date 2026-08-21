@@ -1,6 +1,6 @@
 """MCP server for Amazing Marvin with complete public-API coverage.
 
-34 tools covering all ~31 documented public endpoints: core CRUD + priority,
+36 tools covering all ~31 documented public endpoints plus global sync search: core CRUD + priority,
 habits, time blocks (read + experimental create), time tracking, labels,
 goals, reminders, and kudos/reward points. Deliberately no Smart List /
 task-picking logic — Marvin's own Spotlight does the picking.
@@ -23,6 +23,7 @@ from pydantic import Field
 from .client import MarvinClient, MarvinError, local_today
 from .config import Settings, load_settings
 from .ratelimit import DailyBudgetExceeded, QueueTimeout, RateLimiter
+from .syncdb import SyncDatabaseClient, SyncDatabaseError, filter_tasks, task_result
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ mcp: FastMCP = FastMCP(name="amazing-marvin")
 
 _client: MarvinClient | None = None
 _limiter: RateLimiter | None = None
+_sync_client: SyncDatabaseClient | None = None
 
 
 def get_client() -> MarvinClient:
@@ -41,13 +43,20 @@ def get_client() -> MarvinClient:
 
 def init(settings: Settings, transport=None) -> None:
     """Initialize the global client + limiter. `transport` is used in tests."""
-    global _client, _limiter
+    global _client, _limiter, _sync_client
     _limiter = RateLimiter(state_file=settings.state_dir / "ratelimit-state.json")
     _client = MarvinClient(settings, _limiter, transport=transport)
+    _sync_client = SyncDatabaseClient(settings, transport=transport)
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def invalidate_sync_cache() -> None:
+    """Make global reads reflect task writes performed through this process."""
+    if _sync_client is not None:
+        _sync_client.invalidate()
 
 
 def make_setters(fields: dict[str, Any]) -> list[dict]:
@@ -64,7 +73,7 @@ def make_setters(fields: dict[str, Any]) -> list[dict]:
 
 
 def tool_error(exc: Exception) -> dict:
-    if isinstance(exc, (DailyBudgetExceeded, QueueTimeout, MarvinError)):
+    if isinstance(exc, (DailyBudgetExceeded, QueueTimeout, MarvinError, SyncDatabaseError)):
         return {"error": str(exc)}
     logger.exception("Unexpected error")
     return {"error": f"Unexpected error: {type(exc).__name__}"}
@@ -163,6 +172,7 @@ async def create_task(
         if time_estimate_minutes is not None:
             data["timeEstimate"] = time_estimate_minutes * 60_000
         created = await get_client().add_task(data)
+        invalidate_sync_cache()
         return {"created": created}
     except Exception as e:
         return tool_error(e)
@@ -180,7 +190,9 @@ async def mark_done(
     too (verified live): the instance ID is deterministic
     ('YYYY-MM-DD_<recurringTaskId>'), so no duplicates can occur."""
     try:
-        return {"completed": await get_client().mark_done(item_id)}
+        completed = await get_client().mark_done(item_id)
+        invalidate_sync_cache()
+        return {"completed": completed}
     except Exception as e:
         return tool_error(e)
 
@@ -198,6 +210,7 @@ async def unmark_done(
         result = await get_client().update_doc(
             item_id, make_setters({"done": False, "doneAt": None})
         )
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -244,6 +257,7 @@ async def update_task(
         if not fields:
             return {"error": "No fields to update were given."}
         result = await get_client().update_doc(item_id, make_setters(fields))
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -272,6 +286,7 @@ async def set_priority(
         if not fields:
             return {"error": "Provide priority and/or frog."}
         result = await get_client().update_doc(item_id, make_setters(fields))
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -287,12 +302,87 @@ async def delete_task(
     a recurring task here (risk of the whole series disappearing without the
     app's cleanup logic) — remove the recurrence in the Marvin app instead."""
     try:
-        return {"deleted": await get_client().delete_doc(item_id)}
+        deleted = await get_client().delete_doc(item_id)
+        invalidate_sync_cache()
+        return {"deleted": deleted}
     except Exception as e:
         return tool_error(e)
 
 
 # --------------------------------------------------------------- Reading
+
+
+async def _global_task_matches(**filters: Any) -> list[dict[str, Any]]:
+    """Fetch one cached snapshot and apply the predicates shared by both tools."""
+    global _sync_client
+    if _sync_client is None:
+        init(load_settings())
+    return filter_tasks(await _sync_client.tasks(), **filters)
+
+
+@mcp.tool(annotations=READONLY)
+async def search_tasks(
+    done: Annotated[bool | None, Field(description="True for completed, false for open, null for both")] = None,
+    query: Annotated[str | None, Field(description="Case-insensitive text in title or note")] = None,
+    parent_id: Annotated[str | None, Field(description="Exact parent category/project ID")] = None,
+    backburner: Annotated[bool | None, Field(description="Filter by backburner status")] = None,
+    scheduled: Annotated[bool | None, Field(description="True for scheduled, false for unscheduled")] = None,
+    scheduled_from: Annotated[str | None, Field(description="Earliest scheduled date, YYYY-MM-DD")] = None,
+    scheduled_to: Annotated[str | None, Field(description="Latest scheduled date, YYYY-MM-DD")] = None,
+    due_from: Annotated[str | None, Field(description="Earliest due date, YYYY-MM-DD")] = None,
+    due_to: Annotated[str | None, Field(description="Latest due date, YYYY-MM-DD")] = None,
+    label_ids: Annotated[list[str] | None, Field(description="Require all these label IDs")] = None,
+    include_notes: Annotated[bool, Field(description="Include complete task notes in results")] = False,
+    limit: Annotated[int, Field(description="Maximum tasks returned", ge=1, le=1000)] = 100,
+) -> dict:
+    """Search all actual task documents in Marvin's read-only sync snapshot.
+
+    Unlike get_children, this searches globally without hierarchy traversal.
+    Date ranges are inclusive. Recurring instances are returned faithfully as
+    separate task documents; this tool never creates, changes, or collapses them.
+    Notes are searched regardless, but omitted from results unless include_notes
+    is true, keeping large result sets compact.
+    """
+    try:
+        matches = await _global_task_matches(
+            done=done, query=query, parent_id=parent_id, backburner=backburner,
+            scheduled=scheduled, scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to, due_from=due_from, due_to=due_to,
+            label_ids=label_ids,
+        )
+        return {
+            "count": len(matches[:limit]),
+            "total_matches": len(matches),
+            "tasks": [task_result(task, include_note=include_notes) for task in matches[:limit]],
+        }
+    except Exception as e:
+        return tool_error(e)
+
+
+@mcp.tool(annotations=READONLY)
+async def count_tasks(
+    done: Annotated[bool | None, Field(description="True for completed, false for open, null for both")] = None,
+    query: Annotated[str | None, Field(description="Case-insensitive text in title or note")] = None,
+    parent_id: Annotated[str | None, Field(description="Exact parent category/project ID")] = None,
+    backburner: Annotated[bool | None, Field(description="Filter by backburner status")] = None,
+    scheduled: Annotated[bool | None, Field(description="True for scheduled, false for unscheduled")] = None,
+    scheduled_from: Annotated[str | None, Field(description="Earliest scheduled date, YYYY-MM-DD")] = None,
+    scheduled_to: Annotated[str | None, Field(description="Latest scheduled date, YYYY-MM-DD")] = None,
+    due_from: Annotated[str | None, Field(description="Earliest due date, YYYY-MM-DD")] = None,
+    due_to: Annotated[str | None, Field(description="Latest due date, YYYY-MM-DD")] = None,
+    label_ids: Annotated[list[str] | None, Field(description="Require all these label IDs")] = None,
+) -> dict:
+    """Count global task matches without returning complete task objects."""
+    try:
+        matches = await _global_task_matches(
+            done=done, query=query, parent_id=parent_id, backburner=backburner,
+            scheduled=scheduled, scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to, due_from=due_from, due_to=due_to,
+            label_ids=label_ids,
+        )
+        return {"count": len(matches)}
+    except Exception as e:
+        return tool_error(e)
 
 
 @mcp.tool(annotations=READONLY)

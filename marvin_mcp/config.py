@@ -58,6 +58,10 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8787
     state_dir: Path = Path.home() / ".marvin-mcp"
+    sync_server: str | None = field(default=None, repr=False)
+    sync_database: str | None = field(default=None, repr=False)
+    sync_user: str | None = field(default=None, repr=False)
+    sync_password: str | None = field(default=None, repr=False)
 
     def __repr__(self) -> str:  # mask all token fields
         return (
@@ -80,4 +84,8 @@ def load_settings() -> Settings:
         state_dir=Path(
             os.environ.get("STATE_DIR", str(Path.home() / ".marvin-mcp"))
         ),
+        sync_server=_read_secret("MARVIN_SYNC_SERVER", required=False),
+        sync_database=_read_secret("MARVIN_SYNC_DATABASE", required=False),
+        sync_user=_read_secret("MARVIN_SYNC_USER", required=False),
+        sync_password=_read_secret("MARVIN_SYNC_PASSWORD", required=False),
     )
