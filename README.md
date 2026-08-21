@@ -55,11 +55,13 @@ task; `get_children` only reads one parent's immediate children. Therefore
 `search_tasks` and `count_tasks` follow Marvin's official
 [`marvin-python`](https://github.com/amazingmarvin/marvin-python) example and
 read a CouchDB snapshot through Marvin Sync's documented
-`_all_docs?include_docs=true` approach. A 45-second in-process cache avoids
+`_all_docs?include_docs=true` approach. A 15-minute in-process cache avoids
 re-downloading that snapshot for successive conversational queries.
+Successful task mutations made through this MCP invalidate the snapshot so a
+subsequent global query refreshes it.
 
-Copy the CouchDB connection values shown in Amazing Marvin's sync/account
-settings (the UI may label these as sync database details) into:
+In Amazing Marvin, go to **Strategies → API → View credentials** and copy the
+displayed sync database values into:
 
 - `MARVIN_SYNC_SERVER`
 - `MARVIN_SYNC_DATABASE`
@@ -79,11 +81,14 @@ Example MCP calls (shown as arguments):
 
 ```json
 {"tool": "search_tasks", "arguments": {"done": false, "query": "ICAPS", "scheduled": false, "limit": 50}}
+{"tool": "search_tasks", "arguments": {"parent_id": "PROJECT_ID", "include_notes": true}}
 {"tool": "count_tasks", "arguments": {"done": false, "backburner": true}}
 ```
 
 `done: null` (or omission) includes both open and completed tasks. Text search
-is case-insensitive across titles and notes. Date ranges are inclusive, label
+is case-insensitive across titles and notes. Full notes are omitted from search
+results by default to keep large responses compact; pass `include_notes: true`
+to return them. Date ranges are inclusive, label
 filters require all supplied IDs, and recurring instances are returned as the
 actual task documents stored by Marvin rather than being collapsed.
 

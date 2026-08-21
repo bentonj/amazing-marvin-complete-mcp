@@ -53,6 +53,12 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def invalidate_sync_cache() -> None:
+    """Make global reads reflect task writes performed through this process."""
+    if _sync_client is not None:
+        _sync_client.invalidate()
+
+
 def make_setters(fields: dict[str, Any]) -> list[dict]:
     """Build setters for /doc/update per the wiki's recommendation:
     each field + fieldUpdates.<field> + updatedAt, for correct conflict
@@ -166,6 +172,7 @@ async def create_task(
         if time_estimate_minutes is not None:
             data["timeEstimate"] = time_estimate_minutes * 60_000
         created = await get_client().add_task(data)
+        invalidate_sync_cache()
         return {"created": created}
     except Exception as e:
         return tool_error(e)
@@ -183,7 +190,9 @@ async def mark_done(
     too (verified live): the instance ID is deterministic
     ('YYYY-MM-DD_<recurringTaskId>'), so no duplicates can occur."""
     try:
-        return {"completed": await get_client().mark_done(item_id)}
+        completed = await get_client().mark_done(item_id)
+        invalidate_sync_cache()
+        return {"completed": completed}
     except Exception as e:
         return tool_error(e)
 
@@ -201,6 +210,7 @@ async def unmark_done(
         result = await get_client().update_doc(
             item_id, make_setters({"done": False, "doneAt": None})
         )
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -247,6 +257,7 @@ async def update_task(
         if not fields:
             return {"error": "No fields to update were given."}
         result = await get_client().update_doc(item_id, make_setters(fields))
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -275,6 +286,7 @@ async def set_priority(
         if not fields:
             return {"error": "Provide priority and/or frog."}
         result = await get_client().update_doc(item_id, make_setters(fields))
+        invalidate_sync_cache()
         return {"updated": result}
     except Exception as e:
         return tool_error(e)
@@ -290,7 +302,9 @@ async def delete_task(
     a recurring task here (risk of the whole series disappearing without the
     app's cleanup logic) — remove the recurrence in the Marvin app instead."""
     try:
-        return {"deleted": await get_client().delete_doc(item_id)}
+        deleted = await get_client().delete_doc(item_id)
+        invalidate_sync_cache()
+        return {"deleted": deleted}
     except Exception as e:
         return tool_error(e)
 
@@ -318,6 +332,7 @@ async def search_tasks(
     due_from: Annotated[str | None, Field(description="Earliest due date, YYYY-MM-DD")] = None,
     due_to: Annotated[str | None, Field(description="Latest due date, YYYY-MM-DD")] = None,
     label_ids: Annotated[list[str] | None, Field(description="Require all these label IDs")] = None,
+    include_notes: Annotated[bool, Field(description="Include complete task notes in results")] = False,
     limit: Annotated[int, Field(description="Maximum tasks returned", ge=1, le=1000)] = 100,
 ) -> dict:
     """Search all actual task documents in Marvin's read-only sync snapshot.
@@ -325,6 +340,8 @@ async def search_tasks(
     Unlike get_children, this searches globally without hierarchy traversal.
     Date ranges are inclusive. Recurring instances are returned faithfully as
     separate task documents; this tool never creates, changes, or collapses them.
+    Notes are searched regardless, but omitted from results unless include_notes
+    is true, keeping large result sets compact.
     """
     try:
         matches = await _global_task_matches(
@@ -336,7 +353,7 @@ async def search_tasks(
         return {
             "count": len(matches[:limit]),
             "total_matches": len(matches),
-            "tasks": [task_result(task) for task in matches[:limit]],
+            "tasks": [task_result(task, include_note=include_notes) for task in matches[:limit]],
         }
     except Exception as e:
         return tool_error(e)

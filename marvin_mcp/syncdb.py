@@ -27,7 +27,7 @@ class SyncDatabaseClient:
         self,
         settings: Settings,
         transport: httpx.AsyncBaseTransport | None = None,
-        cache_ttl: float = 45.0,
+        cache_ttl: float = 900.0,
     ) -> None:
         self._settings = settings
         self._transport = transport
@@ -35,6 +35,11 @@ class SyncDatabaseClient:
         self._cached_at = 0.0
         self._cached_tasks: list[dict[str, Any]] | None = None
         self._lock = asyncio.Lock()
+
+    def invalidate(self) -> None:
+        """Discard the snapshot after a successful API-side task mutation."""
+        self._cached_tasks = None
+        self._cached_at = 0.0
 
     def _missing_settings(self) -> list[str]:
         values = {
@@ -66,6 +71,8 @@ class SyncDatabaseClient:
 
     async def _download_tasks(self) -> list[dict[str, Any]]:
         server = self._settings.sync_server.rstrip("/")
+        if "://" not in server:
+            server = f"https://{server}"
         database = quote(self._settings.sync_database, safe="")
         url = f"{server}/{database}/_all_docs"
         try:
@@ -118,7 +125,8 @@ def filter_tasks(
         labels = task.get("labelIds") or []
         if done is not None and bool(task.get("done", False)) is not done:
             return False
-        if needle and needle not in f"{task.get('title', '')}\n{task.get('note', '')}".casefold():
+        haystack = f"{task.get('title') or ''}\n{task.get('note') or ''}".casefold()
+        if needle and needle not in haystack:
             return False
         if parent_id is not None and task.get("parentId") != parent_id:
             return False
@@ -141,9 +149,9 @@ def filter_tasks(
     return [task for task in tasks if matches(task)]
 
 
-def task_result(task: dict[str, Any]) -> dict[str, Any]:
+def task_result(task: dict[str, Any], *, include_note: bool = False) -> dict[str, Any]:
     """Return stable, useful metadata without leaking unrelated sync fields."""
-    return {
+    result = {
         "id": task.get("_id"),
         "title": task.get("title"),
         "done": bool(task.get("done", False)),
@@ -152,5 +160,7 @@ def task_result(task: dict[str, Any]) -> dict[str, Any]:
         "due_date": task.get("dueDate"),
         "backburner": bool(task.get("backburner", False)),
         "label_ids": task.get("labelIds") or [],
-        "note": task.get("note"),
     }
+    if include_note:
+        result["note"] = task.get("note")
+    return result

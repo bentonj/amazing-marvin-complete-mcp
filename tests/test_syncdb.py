@@ -6,7 +6,7 @@ from dataclasses import replace
 import httpx
 
 from marvin_mcp import server
-from marvin_mcp.syncdb import SyncDatabaseClient, filter_tasks
+from marvin_mcp.syncdb import SyncDatabaseClient, filter_tasks, task_result
 
 
 TASKS = [
@@ -27,6 +27,16 @@ def test_shared_filters_cover_task_query_predicates():
     assert [t["_id"] for t in filter_tasks(TASKS, scheduled_to="2026-08-31")] == ["t1"]
     assert [t["_id"] for t in filter_tasks(TASKS, due_from="2026-08-24")] == ["t1"]
     assert len(filter_tasks(TASKS, label_ids=["work", "later"])) == 1
+
+
+def test_text_search_treats_none_fields_as_empty_strings():
+    task = {"_id": "nulls", "db": "Tasks", "title": None, "note": None}
+    assert filter_tasks([task], query="None") == []
+
+
+def test_notes_are_opt_in():
+    assert "note" not in task_result(TASKS[0])
+    assert task_result(TASKS[0], include_note=True)["note"] == "First draft"
 
 
 def sync_settings(settings):
@@ -53,7 +63,7 @@ async def test_search_ignores_deleted_and_non_task_docs(settings):
         due_from=None, due_to=None, label_ids=None, limit=100)
     assert result["total_matches"] == 3
     assert result["tasks"][0]["id"] == "t1"
-    assert set(result["tasks"][0]) == {"id", "title", "done", "parent_id", "scheduled_date", "due_date", "backburner", "label_ids", "note"}
+    assert set(result["tasks"][0]) == {"id", "title", "done", "parent_id", "scheduled_date", "due_date", "backburner", "label_ids"}
 
 
 async def test_count_uses_same_predicates_as_search(settings):
@@ -89,4 +99,39 @@ async def test_snapshot_cache_reuse_and_expiry(settings):
     assert calls == 1
     await asyncio.sleep(0.02)
     await client.tasks()
+    assert calls == 2
+
+
+async def test_sync_server_accepts_hostname_and_https_url(settings):
+    requested_urls = []
+    def handler(request):
+        requested_urls.append(str(request.url.copy_with(query=None)))
+        return httpx.Response(200, json={"rows": []})
+
+    transport = httpx.MockTransport(handler)
+    bare = replace(sync_settings(settings), sync_server="sync.example")
+    qualified = replace(sync_settings(settings), sync_server="https://sync.example")
+    await SyncDatabaseClient(bare, transport).tasks()
+    await SyncDatabaseClient(qualified, transport).tasks()
+    assert requested_urls == [
+        "https://sync.example/user-db/_all_docs",
+        "https://sync.example/user-db/_all_docs",
+    ]
+
+
+async def test_successful_task_mutation_invalidates_snapshot(settings):
+    calls = 0
+    def handler(request):
+        nonlocal calls
+        if request.url.path.endswith("/_all_docs"):
+            calls += 1
+            return httpx.Response(200, json={"rows": [{"doc": TASKS[0]}]})
+        return httpx.Response(200, json={"ok": True})
+
+    server.init(sync_settings(settings), transport=httpx.MockTransport(handler))
+    await server._sync_client.tasks()
+    await server._sync_client.tasks()
+    assert calls == 1
+    assert "error" not in await server.create_task.fn(title="new task")
+    await server._sync_client.tasks()
     assert calls == 2
