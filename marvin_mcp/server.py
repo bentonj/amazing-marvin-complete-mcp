@@ -332,6 +332,11 @@ async def search_tasks(
     due_from: Annotated[str | None, Field(description="Earliest due date, YYYY-MM-DD")] = None,
     due_to: Annotated[str | None, Field(description="Latest due date, YYYY-MM-DD")] = None,
     label_ids: Annotated[list[str] | None, Field(description="Require all these label IDs")] = None,
+    planned_week: Annotated[str | None, Field(description="Exact planned week, identified by its Monday in YYYY-MM-DD format")] = None,
+    planned_month: Annotated[str | None, Field(description="Exact planned month in YYYY-MM format")] = None,
+    week_planned: Annotated[bool | None, Field(description="Filter by whether plannedWeek is non-empty")] = None,
+    month_planned: Annotated[bool | None, Field(description="Filter by whether plannedMonth is non-empty")] = None,
+    planned: Annotated[bool | None, Field(description="True if either planning field is set; false if neither is set")] = None,
     include_notes: Annotated[bool, Field(description="Include complete task notes in results")] = False,
     limit: Annotated[int, Field(description="Maximum tasks returned", ge=1, le=1000)] = 100,
 ) -> dict:
@@ -340,6 +345,8 @@ async def search_tasks(
     Unlike get_children, this searches globally without hierarchy traversal.
     Date ranges are inclusive. Recurring instances are returned faithfully as
     separate task documents; this tool never creates, changes, or collapses them.
+    Planned weeks are identified by their Monday (YYYY-MM-DD), while planned
+    months use YYYY-MM. planned=false requires both planning fields to be empty.
     Notes are searched regardless, but omitted from results unless include_notes
     is true, keeping large result sets compact.
     """
@@ -348,7 +355,9 @@ async def search_tasks(
             done=done, query=query, parent_id=parent_id, backburner=backburner,
             scheduled=scheduled, scheduled_from=scheduled_from,
             scheduled_to=scheduled_to, due_from=due_from, due_to=due_to,
-            label_ids=label_ids,
+            label_ids=label_ids, planned_week=planned_week,
+            planned_month=planned_month, week_planned=week_planned,
+            month_planned=month_planned, planned=planned,
         )
         return {
             "count": len(matches[:limit]),
@@ -371,14 +380,25 @@ async def count_tasks(
     due_from: Annotated[str | None, Field(description="Earliest due date, YYYY-MM-DD")] = None,
     due_to: Annotated[str | None, Field(description="Latest due date, YYYY-MM-DD")] = None,
     label_ids: Annotated[list[str] | None, Field(description="Require all these label IDs")] = None,
+    planned_week: Annotated[str | None, Field(description="Exact planned week, identified by its Monday in YYYY-MM-DD format")] = None,
+    planned_month: Annotated[str | None, Field(description="Exact planned month in YYYY-MM format")] = None,
+    week_planned: Annotated[bool | None, Field(description="Filter by whether plannedWeek is non-empty")] = None,
+    month_planned: Annotated[bool | None, Field(description="Filter by whether plannedMonth is non-empty")] = None,
+    planned: Annotated[bool | None, Field(description="True if either planning field is set; false if neither is set")] = None,
 ) -> dict:
-    """Count global task matches without returning complete task objects."""
+    """Count global task matches without returning complete task objects.
+
+    Planned weeks are identified by their Monday (YYYY-MM-DD), while planned
+    months use YYYY-MM. planned=false requires both planning fields to be empty.
+    """
     try:
         matches = await _global_task_matches(
             done=done, query=query, parent_id=parent_id, backburner=backburner,
             scheduled=scheduled, scheduled_from=scheduled_from,
             scheduled_to=scheduled_to, due_from=due_from, due_to=due_to,
-            label_ids=label_ids,
+            label_ids=label_ids, planned_week=planned_week,
+            planned_month=planned_month, week_planned=week_planned,
+            month_planned=month_planned, planned=planned,
         )
         return {"count": len(matches)}
     except Exception as e:

@@ -15,6 +15,14 @@ TASKS = [
     {"_id": "t3", "db": "Tasks", "title": "Buy milk", "done": False, "parentId": "p2", "day": "2026-09-01"},
 ]
 
+PLANNED_TASKS = [
+    {"_id": "week", "db": "Tasks", "title": "Week", "plannedWeek": "2026-08-17"},
+    {"_id": "month", "db": "Tasks", "title": "Month", "plannedMonth": "2026-08"},
+    {"_id": "both", "db": "Tasks", "title": "Both", "plannedWeek": "2026-08-24", "plannedMonth": "2026-09"},
+    {"_id": "neither", "db": "Tasks", "title": "Neither"},
+    {"_id": "empty", "db": "Tasks", "title": "Empty", "plannedWeek": "", "plannedMonth": ""},
+]
+
 
 def test_shared_filters_cover_task_query_predicates():
     assert [t["_id"] for t in filter_tasks(TASKS, done=False)] == ["t1", "t3"]
@@ -37,6 +45,30 @@ def test_text_search_treats_none_fields_as_empty_strings():
 def test_notes_are_opt_in():
     assert "note" not in task_result(TASKS[0])
     assert task_result(TASKS[0], include_note=True)["note"] == "First draft"
+
+
+def test_planning_filters_use_only_explicit_task_fields():
+    ids = lambda **filters: [t["_id"] for t in filter_tasks(PLANNED_TASKS, **filters)]
+
+    assert ids(planned_week="2026-08-17") == ["week"]
+    assert ids(planned_month="2026-08") == ["month"]
+    assert ids(planned_week="2026-08-24") == ["both"]
+    assert ids(planned_month="2026-09") == ["both"]
+    assert ids(week_planned=True) == ["week", "both"]
+    assert ids(week_planned=False) == ["month", "neither", "empty"]
+    assert ids(month_planned=True) == ["month", "both"]
+    assert ids(month_planned=False) == ["week", "neither", "empty"]
+    assert ids(planned=True) == ["week", "month", "both"]
+    assert ids(planned=False) == ["neither", "empty"]
+
+
+def test_task_results_include_nullable_planning_fields():
+    assert task_result(PLANNED_TASKS[2])["planned_week"] == "2026-08-24"
+    assert task_result(PLANNED_TASKS[2])["planned_month"] == "2026-09"
+    assert task_result(PLANNED_TASKS[3])["planned_week"] is None
+    assert task_result(PLANNED_TASKS[3])["planned_month"] is None
+    assert task_result(PLANNED_TASKS[4])["planned_week"] is None
+    assert task_result(PLANNED_TASKS[4])["planned_month"] is None
 
 
 def sync_settings(settings):
@@ -63,7 +95,7 @@ async def test_search_ignores_deleted_and_non_task_docs(settings):
         due_from=None, due_to=None, label_ids=None, limit=100)
     assert result["total_matches"] == 3
     assert result["tasks"][0]["id"] == "t1"
-    assert set(result["tasks"][0]) == {"id", "title", "done", "parent_id", "scheduled_date", "due_date", "backburner", "label_ids"}
+    assert set(result["tasks"][0]) == {"id", "title", "done", "parent_id", "scheduled_date", "due_date", "planned_week", "planned_month", "backburner", "label_ids"}
 
 
 async def test_count_uses_same_predicates_as_search(settings):
@@ -73,6 +105,26 @@ async def test_count_uses_same_predicates_as_search(settings):
         backburner=True, scheduled=None, scheduled_from=None, scheduled_to=None,
         due_from=None, due_to=None, label_ids=["work"])
     assert count == {"count": 1}
+
+
+async def test_search_and_count_share_planning_filter_semantics(settings):
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        200, json={"rows": [{"doc": task} for task in PLANNED_TASKS]}
+    ))
+    server.init(sync_settings(settings), transport=transport)
+
+    filters = {
+        "planned_week": None,
+        "planned_month": None,
+        "week_planned": None,
+        "month_planned": None,
+        "planned": False,
+    }
+    search = await server.search_tasks.fn(**filters)
+    count = await server.count_tasks.fn(**filters)
+
+    assert [task["id"] for task in search["tasks"]] == ["neither", "empty"]
+    assert search["total_matches"] == count["count"] == 2
 
 
 async def test_missing_sync_configuration_only_affects_search(settings, transport):
