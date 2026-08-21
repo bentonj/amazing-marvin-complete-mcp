@@ -115,6 +115,11 @@ def filter_tasks(
     due_from: str | None = None,
     due_to: str | None = None,
     label_ids: list[str] | None = None,
+    planned_week: str | None = None,
+    planned_month: str | None = None,
+    week_planned: bool | None = None,
+    month_planned: bool | None = None,
+    planned: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Apply the shared search/count predicates to task documents."""
     needle = query.casefold().strip() if query else None
@@ -123,6 +128,8 @@ def filter_tasks(
         day = task.get("day")
         due = task.get("dueDate")
         labels = task.get("labelIds") or []
+        task_planned_week = task.get("plannedWeek")
+        task_planned_month = task.get("plannedMonth")
         if done is not None and bool(task.get("done", False)) is not done:
             return False
         haystack = f"{task.get('title') or ''}\n{task.get('note') or ''}".casefold()
@@ -144,6 +151,18 @@ def filter_tasks(
             return False
         if label_ids and not set(label_ids).issubset(labels):
             return False
+        if planned_week is not None and task_planned_week != planned_week:
+            return False
+        if planned_month is not None and task_planned_month != planned_month:
+            return False
+        has_planned_week = bool(task_planned_week)
+        has_planned_month = bool(task_planned_month)
+        if week_planned is not None and has_planned_week is not week_planned:
+            return False
+        if month_planned is not None and has_planned_month is not month_planned:
+            return False
+        if planned is not None and (has_planned_week or has_planned_month) is not planned:
+            return False
         return True
 
     return [task for task in tasks if matches(task)]
@@ -158,6 +177,8 @@ def task_result(task: dict[str, Any], *, include_note: bool = False) -> dict[str
         "parent_id": task.get("parentId"),
         "scheduled_date": task.get("day"),
         "due_date": task.get("dueDate"),
+        "planned_week": task.get("plannedWeek") or None,
+        "planned_month": task.get("plannedMonth") or None,
         "backburner": bool(task.get("backburner", False)),
         "label_ids": task.get("labelIds") or [],
     }
