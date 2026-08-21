@@ -2,7 +2,7 @@
 
 An MCP ([Model Context Protocol](https://modelcontextprotocol.io)) server for
 [Amazing Marvin](https://amazingmarvin.com) with **complete coverage of the
-public API**: 34 tools over all ~31 documented endpoints, a global rate
+public API** plus read-only global task search: 36 tools over all ~31 documented endpoints, a global rate
 limiter that respects Marvin's documented limits, least-privilege token
 routing, and MCP tool annotations. Every non-obvious behavior claim in the
 tool descriptions was verified against the live API — the findings are
@@ -12,12 +12,12 @@ which may be useful even if you never run this server.
 > **Provided as-is.** This project is not actively maintained and comes with
 > no support. Issues are disabled on purpose. Fork freely — it's MIT.
 
-## Tools (34)
+## Tools (36)
 
 | Group | Tools |
 |---|---|
 | Core | `test_connection`, `create_task`, `mark_done`, `unmark_done`, `update_task`, `set_priority`, `delete_task` |
-| Reading | `get_today_items`, `get_due_items`, `get_children`, `get_categories` |
+| Reading | `search_tasks`, `count_tasks`, `get_today_items`, `get_due_items`, `get_children`, `get_categories` |
 | Structure | `create_category_or_project` |
 | Habits | `list_habits`, `get_habit`, `record_habit` |
 | Time blocks | `get_today_time_blocks`, `create_time_block` (experimental) |
@@ -47,6 +47,45 @@ Both tokens live in Amazing Marvin under **Settings → API**
   blocks, `list_habits`, reminders, `reset_reward_points`.
 
 Treat them like passwords; see [SECURITY.md](SECURITY.md).
+
+### Sync database credentials (global search only)
+
+The ordinary public Marvin API has no endpoint that lists or searches every
+task; `get_children` only reads one parent's immediate children. Therefore
+`search_tasks` and `count_tasks` follow Marvin's official
+[`marvin-python`](https://github.com/amazingmarvin/marvin-python) example and
+read a CouchDB snapshot through Marvin Sync's documented
+`_all_docs?include_docs=true` approach. A 45-second in-process cache avoids
+re-downloading that snapshot for successive conversational queries.
+
+Copy the CouchDB connection values shown in Amazing Marvin's sync/account
+settings (the UI may label these as sync database details) into:
+
+- `MARVIN_SYNC_SERVER`
+- `MARVIN_SYNC_DATABASE`
+- `MARVIN_SYNC_USER`
+- `MARVIN_SYNC_PASSWORD`
+
+These are separate from the API and Full Access tokens under **Settings →
+API**. They are optional: without them the server and every ordinary API tool
+continue to work, while only the two global-search tools return a configuration
+error. Like the existing secrets, every value supports a `_FILE` variant.
+
+**CouchDB access in this connector is strictly read-only.** All creation,
+updates, completion, priority/frog changes, and deletion continue through the
+normal Marvin API; the connector contains no CouchDB mutation operation.
+
+Example MCP calls (shown as arguments):
+
+```json
+{"tool": "search_tasks", "arguments": {"done": false, "query": "ICAPS", "scheduled": false, "limit": 50}}
+{"tool": "count_tasks", "arguments": {"done": false, "backburner": true}}
+```
+
+`done: null` (or omission) includes both open and completed tasks. Text search
+is case-insensitive across titles and notes. Date ranges are inclusive, label
+filters require all supplied IDs, and recurring instances are returned as the
+actual task documents stored by Marvin rather than being collapsed.
 
 ## Install & run
 
