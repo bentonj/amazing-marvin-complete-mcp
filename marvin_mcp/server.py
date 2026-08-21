@@ -33,8 +33,9 @@ _limiter: RateLimiter | None = None
 
 
 def get_client() -> MarvinClient:
+    global _client
     if _client is None:
-        raise RuntimeError("Client is not initialized (run via __main__)")
+        init(load_settings())
     return _client
 
 
